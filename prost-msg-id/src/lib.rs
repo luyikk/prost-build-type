@@ -14,7 +14,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 /// prost type msg id trait
-pub trait MsgId : Debug {
+pub trait MsgId {
     /// get struct msg id
     fn get_msg_id(&self) -> i32;
 }
