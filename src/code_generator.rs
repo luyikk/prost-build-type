@@ -120,19 +120,21 @@ impl<'a> CodeGenerator<'a> {
             code_gen.path.pop();
         }
 
-        code_gen.buf.push_str("\n///get all msg type id");
-        code_gen.buf.push_str("\n#[allow(dead_code)]");
-        code_gen
-            .buf
-            .push_str("\npub const fn msg_ids()->&'static [i32]{");
-        code_gen.buf.push_str("\n    &[");
-        for (id, name) in code_gen.type_message {
+        if code_gen.type_message.len()>0 {
+            code_gen.buf.push_str("\n///get all msg type id");
+            code_gen.buf.push_str("\n#[allow(dead_code)]");
             code_gen
                 .buf
-                .push_str(&format!("\n        {}, //{}", id, name));
+                .push_str("\npub const fn msg_ids()->&'static [i32]{");
+            code_gen.buf.push_str("\n    &[");
+            for (id, name) in code_gen.type_message {
+                code_gen
+                    .buf
+                    .push_str(&format!("\n        {}, //{}", id, name));
+            }
+            code_gen.buf.push_str("\n    ]");
+            code_gen.buf.push_str("\n}");
         }
-        code_gen.buf.push_str("\n    ]");
-        code_gen.buf.push_str("\n}");
     }
 
     fn append_message(&mut self, message: DescriptorProto) {

@@ -886,9 +886,12 @@ impl Config {
                 continue;
             }
 
-            let file_name = file_names
+            let  file_name = file_names
                 .get(module)
                 .expect("every module should have a filename");
+
+            let file_name= file_name.replace(".","_");
+
             let output_path = target.join(file_name);
 
             let previous_content = fs::read(&output_path);
