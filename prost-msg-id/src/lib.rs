@@ -12,9 +12,9 @@ message Fail{
 use std::rc::Rc;
 use std::sync::Arc;
 
-/// prost type msg id
+/// prost type msg id trait
 pub trait MsgId {
-    /// get prost struct msg id
+    /// get struct msg id
     fn get_msg_id(&self) -> i32;
 }
 
