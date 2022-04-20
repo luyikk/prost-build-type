@@ -36,6 +36,7 @@ pub struct CodeGenerator<'a> {
     depth: u8,
     path: Vec<i32>,
     buf: &'a mut String,
+    type_message: HashMap<i32, String>,
 }
 
 fn push_indent(buf: &mut String, depth: u8) {
@@ -79,6 +80,7 @@ impl<'a> CodeGenerator<'a> {
             depth: 0,
             path: Vec::new(),
             buf,
+            type_message: HashMap::new(),
         };
 
         debug!(
@@ -117,6 +119,20 @@ impl<'a> CodeGenerator<'a> {
 
             code_gen.path.pop();
         }
+
+        code_gen.buf.push_str("\n///get all msg type id");
+        code_gen.buf.push_str("\n#[allow(dead_code)]");
+        code_gen
+            .buf
+            .push_str("\npub const fn msg_ids()->&'static [i32]{");
+        code_gen.buf.push_str("\n    &[");
+        for (id, name) in code_gen.type_message {
+            code_gen
+                .buf
+                .push_str(&format!("\n        {}, //{}", id, name));
+        }
+        code_gen.buf.push_str("\n    ]");
+        code_gen.buf.push_str("\n}");
     }
 
     fn append_message(&mut self, message: DescriptorProto) {
@@ -181,6 +197,30 @@ impl<'a> CodeGenerator<'a> {
                 }
             });
 
+        // check MsgId by enum
+        let mut msg_id = None;
+        if !message.enum_type.is_empty() {
+            'p: for nested_enum in message.enum_type.iter() {
+                if nested_enum.name() == "MsgId" {
+                    for value in nested_enum.value.iter() {
+                        if value.name() == "Id" {
+                            if let Some(id) = value.number {
+                                assert!(
+                                    self.type_message
+                                        .insert(id, fq_message_name.clone())
+                                        .is_none(),
+                                    "msg id repeat:{}",
+                                    id
+                                );
+                                msg_id = Some(id);
+                                break 'p;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         self.append_doc(&fq_message_name, None);
         self.append_type_attributes(&fq_message_name);
         self.push_indent();
@@ -227,6 +267,27 @@ impl<'a> CodeGenerator<'a> {
         self.depth -= 1;
         self.push_indent();
         self.buf.push_str("}\n");
+
+        if let Some(msg_id) = msg_id {
+            self.push_indent();
+            self.buf.push_str("impl ");
+            self.buf.push_str(&to_upper_camel(&message_name));
+            self.buf.push_str(" {\n");
+            self.depth += 1;
+            self.push_indent();
+            self.buf.push_str("#[allow(dead_code)]\n");
+            self.push_indent();
+            self.buf.push_str("pub const fn get_msg_id() -> i32 {\n");
+            self.depth += 1;
+            self.push_indent();
+            self.buf.push_str(&format!("{}\n", msg_id));
+            self.depth -= 1;
+            self.push_indent();
+            self.buf.push_str("}\n");
+            self.depth -= 1;
+            self.push_indent();
+            self.buf.push_str("}\n");
+        }
 
         if !message.enum_type.is_empty() || !nested_types.is_empty() || !oneof_fields.is_empty() {
             self.push_mod(&message_name);
@@ -322,7 +383,7 @@ impl<'a> CodeGenerator<'a> {
                 .copied()
                 .unwrap_or_default();
             self.buf
-                .push_str(&format!("={:?}", bytes_type.annotation()));
+                .push_str(&format!(" = {:?}", bytes_type.annotation()));
         }
 
         match field.label() {
@@ -348,7 +409,7 @@ impl<'a> CodeGenerator<'a> {
         if boxed {
             self.buf.push_str(", boxed");
         }
-        self.buf.push_str(", tag=\"");
+        self.buf.push_str(", tag = \"");
         self.buf.push_str(&field.number().to_string());
 
         if let Some(ref default) = field.default_value {
@@ -821,7 +882,7 @@ impl<'a> CodeGenerator<'a> {
             Type::Group => Cow::Borrowed("group"),
             Type::Message => Cow::Borrowed("message"),
             Type::Enum => Cow::Owned(format!(
-                "enumeration={:?}",
+                "enumeration = {:?}",
                 self.resolve_ident(field.type_name())
             )),
         }

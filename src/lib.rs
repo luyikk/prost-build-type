@@ -120,6 +120,8 @@
 //!
 //! [protobuf-build]: https://github.com/protocolbuffers/protobuf/blob/master/src/README.md
 
+extern crate core;
+
 mod ast;
 mod code_generator;
 mod extern_paths;
