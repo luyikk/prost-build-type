@@ -1,13 +1,9 @@
 [package]
-name = "prost-build"
-version = "0.10.1"
-authors = [
-    "Dan Burkert <dan@danburkert.com>",
-    "Tokio Contributors <team@tokio.rs>",
-]
+name = "prost-msg-build"
+version = "0.1.0"
 license = "Apache-2.0"
-repository = "https://github.com/tokio-rs/prost"
-documentation = "https://docs.rs/prost-build"
+repository = "https://github.com/luyikk/prost-build-type"
+documentation = "https://docs.rs/prost-msg-build"
 readme = "README.md"
 description = "A Protocol Buffers implementation for the Rust Language."
 edition = "2018"

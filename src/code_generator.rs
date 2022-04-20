@@ -269,6 +269,17 @@ impl<'a> CodeGenerator<'a> {
         self.buf.push_str("}\n");
 
         if let Some(msg_id) = msg_id {
+            self.buf.push_str("\n");
+            self.append_doc(&fq_message_name, None);
+            self.push_indent();
+            self.buf.push_str("#[allow(dead_code)]\n");
+            self.push_indent();
+            self.buf.push_str("pub const ");
+            self.buf.push_str(&message_name.to_uppercase());
+            self.buf.push_str("_ID: i32 = ");
+            self.buf.push_str(&to_upper_camel(&message_name));
+            self.buf.push_str("::get_msg_id();\n\n");
+
             self.push_indent();
             self.buf.push_str("impl ");
             self.buf.push_str(&to_upper_camel(&message_name));
@@ -286,7 +297,24 @@ impl<'a> CodeGenerator<'a> {
             self.buf.push_str("}\n");
             self.depth -= 1;
             self.push_indent();
+            self.buf.push_str("}\n\n");
+
+            self.push_indent();
+            self.buf.push_str("impl ::prost_msg_id::MsgId for ");
+            self.buf.push_str(&to_upper_camel(&message_name));
+            self.buf.push_str(" {\n");
+            self.depth += 1;
+            self.push_indent();
+            self.buf.push_str("fn get_msg_id(&self) -> i32 {\n");
+            self.depth += 1;
+            self.push_indent();
+            self.buf.push_str("Self::get_msg_id()\n");
+            self.depth -= 1;
+            self.push_indent();
             self.buf.push_str("}\n");
+            self.depth -= 1;
+            self.push_indent();
+            self.buf.push_str("}\n\n");
         }
 
         if !message.enum_type.is_empty() || !nested_types.is_empty() || !oneof_fields.is_empty() {
