@@ -9,9 +9,29 @@ message Fail{
 
 
 
+use std::rc::Rc;
+use std::sync::Arc;
+
 /// prost type msg id
 pub trait MsgId {
     /// get prost struct msg id
     fn get_msg_id(&self) -> i32;
 }
 
+impl <T:MsgId> MsgId for Box<T>{
+    fn get_msg_id(&self) -> i32 {
+        self.get_msg_id()
+    }
+}
+
+impl <T:MsgId> MsgId for Rc<T>{
+    fn get_msg_id(&self) -> i32 {
+        self.get_msg_id()
+    }
+}
+
+impl <T:MsgId> MsgId for Arc<T>{
+    fn get_msg_id(&self) -> i32 {
+        self.get_msg_id()
+    }
+}
