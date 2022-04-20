@@ -892,7 +892,7 @@ impl Config {
 
             let file_name= file_name.replace(".","_");
 
-            let output_path = target.join(file_name);
+            let output_path = target.join(&file_name);
 
             let previous_content = fs::read(&output_path);
 
