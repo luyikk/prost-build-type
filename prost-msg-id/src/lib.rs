@@ -9,29 +9,30 @@ message Fail{
 
 
 
+use std::fmt::Debug;
 use std::rc::Rc;
 use std::sync::Arc;
 
 /// prost type msg id trait
-pub trait MsgId {
+pub trait MsgId : Debug + Send + Sync{
     /// get struct msg id
     fn get_msg_id(&self) -> i32;
 }
 
 impl <T:MsgId> MsgId for Box<T>{
     fn get_msg_id(&self) -> i32 {
-        self.get_msg_id()
+        (**self).get_msg_id()
     }
 }
 
 impl <T:MsgId> MsgId for Rc<T>{
     fn get_msg_id(&self) -> i32 {
-        self.get_msg_id()
+        (**self).get_msg_id()
     }
 }
 
 impl <T:MsgId> MsgId for Arc<T>{
     fn get_msg_id(&self) -> i32 {
-        self.get_msg_id()
+        (**self).get_msg_id()
     }
 }
