@@ -2,6 +2,7 @@ use std::ascii;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::iter;
+use heck::ToSnakeCase;
 
 use itertools::{Either, Itertools};
 use log::debug;
@@ -277,7 +278,7 @@ impl<'a> CodeGenerator<'a> {
             self.buf.push_str("#[allow(dead_code)]\n");
             self.push_indent();
             self.buf.push_str("pub const ");
-            self.buf.push_str(&message_name.to_uppercase());
+            self.buf.push_str(&message_name.to_snake_case().to_uppercase());
             self.buf.push_str("_ID: i32 = ");
             self.buf.push_str(&to_upper_camel(&message_name));
             self.buf.push_str("::get_msg_id();\n\n");
