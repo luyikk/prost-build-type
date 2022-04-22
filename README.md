@@ -1,5 +1,5 @@
-[![Documentation](https://docs.rs/prost-build/badge.svg)](https://docs.rs/prost-msg-build/)
-[![Crate](https://img.shields.io/crates/v/prost-build.svg)](https://crates.io/crates/prost-msg-build)
+[![Documentation](https://docs.rs/prost-msg-build/badge.svg)](https://docs.rs/prost-msg-build/)
+[![Crate](https://img.shields.io/crates/v/prost-msg-build.svg)](https://crates.io/crates/prost-msg-build)
 
 # prost-msg-build
 
