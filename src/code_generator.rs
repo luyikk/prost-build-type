@@ -318,6 +318,44 @@ impl<'a> CodeGenerator<'a> {
             self.depth -= 1;
             self.push_indent();
             self.buf.push_str("}\n\n");
+
+            self.push_indent();
+            self.buf.push_str("impl TryFrom<&[u8]> for ");
+            self.buf.push_str(&to_upper_camel(&message_name));
+            self.buf.push_str(" {\n");
+            self.depth += 1;
+            self.push_indent();
+            self.buf.push_str("type Error = ::prost::DecodeError;\n");
+            self.push_indent();
+            self.buf.push_str("fn try_from(value: &[u8]) -> Result<Self, Self::Error> {\n");
+            self.depth += 1;
+            self.push_indent();
+            self.buf.push_str("::prost::Message::decode(value)\n");
+            self.depth -= 1;
+            self.push_indent();
+            self.buf.push_str("}\n");
+            self.depth -= 1;
+            self.push_indent();
+            self.buf.push_str("}\n");
+
+            self.push_indent();
+            self.buf.push_str("impl TryFrom<Vec<u8>> for ");
+            self.buf.push_str(&to_upper_camel(&message_name));
+            self.buf.push_str(" {\n");
+            self.depth += 1;
+            self.push_indent();
+            self.buf.push_str("type Error = ::prost::DecodeError;\n");
+            self.push_indent();
+            self.buf.push_str("fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {\n");
+            self.depth += 1;
+            self.push_indent();
+            self.buf.push_str("::prost::Message::decode(value.as_slice())\n");
+            self.depth -= 1;
+            self.push_indent();
+            self.buf.push_str("}\n");
+            self.depth -= 1;
+            self.push_indent();
+            self.buf.push_str("}\n");
         }
 
         if !message.enum_type.is_empty() || !nested_types.is_empty() || !oneof_fields.is_empty() {
