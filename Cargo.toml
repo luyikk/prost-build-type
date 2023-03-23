@@ -1,6 +1,6 @@
 [package]
 name = "prost-msg-build"
-version = "0.1.6"
+version = "0.2.0"
 license = "Apache-2.0"
 repository = "https://github.com/luyikk/prost-build-type"
 documentation = "https://docs.rs/prost-msg-build"
@@ -9,8 +9,10 @@ description = "A Protocol Buffers implementation for the Rust Language."
 edition = "2018"
 
 [features]
-default = []
-vendored = []
+default = ["format"]
+format = ["prettyplease", "syn"]
+# When MSRV moves to 1.60, these can change to dep:
+cleanup-markdown = ["pulldown-cmark", "pulldown-cmark-to-cmark"]
 
 [dependencies]
 bytes = { version = "1", default-features = false }
@@ -24,11 +26,15 @@ prost-types = { version = "0.11", default-features = false }
 tempfile = "3"
 lazy_static = "1.4.0"
 regex = { version = "1.5.5", default-features = false, features = ["std", "unicode-bool"] }
+which = "4"
 
-[build-dependencies]
-which = { version = "4", default-features = false }
-cfg-if = "1"
-cmake = "0.1"
+prettyplease = { version = "0.1", optional = true }
+syn = { version = "1", features = ["full"], optional = true }
+
+# These two must be kept in sync, used for `cleanup-markdown` feature.
+pulldown-cmark = { version = "0.9.1", optional = true, default-features = false }
+pulldown-cmark-to-cmark = { version = "10.0.1", optional = true }
+
 
 [dev-dependencies]
 env_logger = { version = "0.10", default-features = false }

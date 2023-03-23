@@ -1,8 +1,8 @@
+use heck::ToSnakeCase;
 use std::ascii;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::iter;
-use heck::ToSnakeCase;
 
 use itertools::{Either, Itertools};
 use log::debug;
@@ -30,7 +30,7 @@ enum Syntax {
 pub struct CodeGenerator<'a> {
     config: &'a mut Config,
     package: String,
-    source_info: SourceCodeInfo,
+    source_info: Option<SourceCodeInfo>,
     syntax: Syntax,
     message_graph: &'a MessageGraph,
     extern_paths: &'a ExternPaths,
@@ -45,7 +45,6 @@ fn push_indent(buf: &mut String, depth: u8) {
         buf.push_str("    ");
     }
 }
-
 impl<'a> CodeGenerator<'a> {
     pub fn generate(
         config: &mut Config,
@@ -54,16 +53,14 @@ impl<'a> CodeGenerator<'a> {
         file: FileDescriptorProto,
         buf: &mut String,
     ) {
-        let mut source_info = file
-            .source_code_info
-            .expect("no source code info in request");
-        source_info.location.retain(|location| {
-            let len = location.path.len();
-            len > 0 && len % 2 == 0
+        let source_info = file.source_code_info.map(|mut s| {
+            s.location.retain(|loc| {
+                let len = loc.path.len();
+                len > 0 && len % 2 == 0
+            });
+            s.location.sort_by(|a, b| a.path.cmp(&b.path));
+            s
         });
-        source_info
-            .location
-            .sort_by_key(|location| location.path.clone());
 
         let syntax = match file.syntax.as_ref().map(String::as_str) {
             None | Some("proto2") => Syntax::Proto2,
@@ -81,7 +78,7 @@ impl<'a> CodeGenerator<'a> {
             depth: 0,
             path: Vec::new(),
             buf,
-            type_message: HashMap::new(),
+            type_message: Default::default(),
         };
 
         debug!(
@@ -121,7 +118,7 @@ impl<'a> CodeGenerator<'a> {
             code_gen.path.pop();
         }
 
-        if code_gen.type_message.len()>0 {
+        if !code_gen.type_message.is_empty() {
             code_gen.buf.push_str("\n///get all msg type id");
             code_gen.buf.push_str("\n#[allow(dead_code)]");
             code_gen
@@ -226,9 +223,14 @@ impl<'a> CodeGenerator<'a> {
 
         self.append_doc(&fq_message_name, None);
         self.append_type_attributes(&fq_message_name);
+        self.append_message_attributes(&fq_message_name);
         self.push_indent();
         self.buf
-            .push_str("#[derive(Clone, PartialEq, ::prost::Message)]\n");
+            .push_str("#[allow(clippy::derive_partial_eq_without_eq)]\n");
+        self.buf.push_str(&format!(
+            "#[derive(Clone, PartialEq, {}::Message)]\n",
+            self.config.prost_path.as_deref().unwrap_or("::prost")
+        ));
         self.push_indent();
         self.buf.push_str("pub struct ");
         self.buf.push_str(&to_upper_camel(&message_name));
@@ -243,9 +245,7 @@ impl<'a> CodeGenerator<'a> {
                 .as_ref()
                 .and_then(|type_name| map_types.get(type_name))
             {
-                Some(&(ref key, ref value)) => {
-                    self.append_map_field(&fq_message_name, field, key, value)
-                }
+                Some((key, value)) => self.append_map_field(&fq_message_name, field, key, value),
                 None => self.append_field(&fq_message_name, field),
             }
             self.path.pop();
@@ -272,13 +272,14 @@ impl<'a> CodeGenerator<'a> {
         self.buf.push_str("}\n");
 
         if let Some(msg_id) = msg_id {
-            self.buf.push_str("\n");
+            self.buf.push('\n');
             self.append_doc(&fq_message_name, None);
             self.push_indent();
             self.buf.push_str("#[allow(dead_code)]\n");
             self.push_indent();
             self.buf.push_str("pub const ");
-            self.buf.push_str(&message_name.to_snake_case().to_uppercase());
+            self.buf
+                .push_str(&message_name.to_snake_case().to_uppercase());
             self.buf.push_str("_ID: i32 = ");
             self.buf.push_str(&to_upper_camel(&message_name));
             self.buf.push_str("::get_msg_id();\n\n");
@@ -327,7 +328,8 @@ impl<'a> CodeGenerator<'a> {
             self.push_indent();
             self.buf.push_str("type Error = ::prost::DecodeError;\n");
             self.push_indent();
-            self.buf.push_str("fn try_from(value: &[u8]) -> Result<Self, Self::Error> {\n");
+            self.buf
+                .push_str("fn try_from(value: &[u8]) -> Result<Self, Self::Error> {\n");
             self.depth += 1;
             self.push_indent();
             self.buf.push_str("::prost::Message::decode(value)\n");
@@ -346,10 +348,12 @@ impl<'a> CodeGenerator<'a> {
             self.push_indent();
             self.buf.push_str("type Error = ::prost::DecodeError;\n");
             self.push_indent();
-            self.buf.push_str("fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {\n");
+            self.buf
+                .push_str("fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {\n");
             self.depth += 1;
             self.push_indent();
-            self.buf.push_str("::prost::Message::decode(value.as_slice())\n");
+            self.buf
+                .push_str("::prost::Message::decode(value.as_slice())\n");
             self.depth -= 1;
             self.push_indent();
             self.buf.push_str("}\n");
@@ -393,6 +397,24 @@ impl<'a> CodeGenerator<'a> {
     fn append_type_attributes(&mut self, fq_message_name: &str) {
         assert_eq!(b'.', fq_message_name.as_bytes()[0]);
         for attribute in self.config.type_attributes.get(fq_message_name) {
+            push_indent(self.buf, self.depth);
+            self.buf.push_str(attribute);
+            self.buf.push('\n');
+        }
+    }
+
+    fn append_message_attributes(&mut self, fq_message_name: &str) {
+        assert_eq!(b'.', fq_message_name.as_bytes()[0]);
+        for attribute in self.config.message_attributes.get(fq_message_name) {
+            push_indent(self.buf, self.depth);
+            self.buf.push_str(attribute);
+            self.buf.push('\n');
+        }
+    }
+
+    fn append_enum_attributes(&mut self, fq_message_name: &str) {
+        assert_eq!(b'.', fq_message_name.as_bytes()[0]);
+        for attribute in self.config.enum_attributes.get(fq_message_name) {
             push_indent(self.buf, self.depth);
             self.buf.push_str(attribute);
             self.buf.push('\n');
@@ -452,7 +474,7 @@ impl<'a> CodeGenerator<'a> {
                 .copied()
                 .unwrap_or_default();
             self.buf
-                .push_str(&format!(" = {:?}", bytes_type.annotation()));
+                .push_str(&format!("={:?}", bytes_type.annotation()));
         }
 
         match field.label() {
@@ -478,7 +500,7 @@ impl<'a> CodeGenerator<'a> {
         if boxed {
             self.buf.push_str(", boxed");
         }
-        self.buf.push_str(", tag = \"");
+        self.buf.push_str(", tag=\"");
         self.buf.push_str(&field.number().to_string());
 
         if let Some(ref default) = field.default_value {
@@ -492,8 +514,8 @@ impl<'a> CodeGenerator<'a> {
                 }
                 self.buf.push_str("\\\"");
             } else if type_ == Type::Enum {
-                let enum_value = to_upper_camel(default);
-                let stripped_prefix = if self.config.strip_enum_prefix {
+                let mut enum_value = to_upper_camel(default);
+                if self.config.strip_enum_prefix {
                     // Field types are fully qualified, so we extract
                     // the last segment and strip it from the left
                     // side of the default value.
@@ -503,11 +525,9 @@ impl<'a> CodeGenerator<'a> {
                         .and_then(|ty| ty.split('.').last())
                         .unwrap();
 
-                    strip_enum_prefix(&to_upper_camel(enum_type), &enum_value)
-                } else {
-                    &enum_value
-                };
-                self.buf.push_str(stripped_prefix);
+                    enum_value = strip_enum_prefix(&to_upper_camel(enum_type), &enum_value)
+                }
+                self.buf.push_str(&enum_value);
             } else {
                 self.buf.push_str(&default.escape_default().to_string());
             }
@@ -519,13 +539,18 @@ impl<'a> CodeGenerator<'a> {
         self.buf.push_str("pub ");
         self.buf.push_str(&to_snake(field.name()));
         self.buf.push_str(": ");
+
+        let prost_path = self.config.prost_path.as_deref().unwrap_or("::prost");
+
         if repeated {
-            self.buf.push_str("::prost::alloc::vec::Vec<");
+            self.buf
+                .push_str(&format!("{}::alloc::vec::Vec<", prost_path));
         } else if optional {
             self.buf.push_str("::core::option::Option<");
         }
         if boxed {
-            self.buf.push_str("::prost::alloc::boxed::Box<");
+            self.buf
+                .push_str(&format!("{}::alloc::boxed::Box<", prost_path));
         }
         self.buf.push_str(&ty);
         if boxed {
@@ -601,10 +626,7 @@ impl<'a> CodeGenerator<'a> {
         self.buf.push_str(&format!(
             "#[prost(oneof=\"{}\", tags=\"{}\")]\n",
             name,
-            fields
-                .iter()
-                .map(|&(ref field, _)| field.number())
-                .join(", ")
+            fields.iter().map(|(field, _)| field.number()).join(", ")
         ));
         self.append_field_attributes(fq_message_name, oneof.name());
         self.push_indent();
@@ -630,9 +652,14 @@ impl<'a> CodeGenerator<'a> {
 
         let oneof_name = format!("{}.{}", fq_message_name, oneof.name());
         self.append_type_attributes(&oneof_name);
+        self.append_enum_attributes(&oneof_name);
         self.push_indent();
         self.buf
-            .push_str("#[derive(Clone, PartialEq, ::prost::Oneof)]\n");
+            .push_str("#[allow(clippy::derive_partial_eq_without_eq)]\n");
+        self.buf.push_str(&format!(
+            "#[derive(Clone, PartialEq, {}::Oneof)]\n",
+            self.config.prost_path.as_deref().unwrap_or("::prost")
+        ));
         self.push_indent();
         self.buf.push_str("pub enum ");
         self.buf.push_str(&to_upper_camel(oneof.name()));
@@ -689,14 +716,13 @@ impl<'a> CodeGenerator<'a> {
         self.buf.push_str("}\n");
     }
 
-    fn location(&self) -> &Location {
-        let idx = self
-            .source_info
+    fn location(&self) -> Option<&Location> {
+        let source_info = self.source_info.as_ref()?;
+        let idx = source_info
             .location
             .binary_search_by_key(&&self.path[..], |location| &location.path[..])
             .unwrap();
-
-        &self.source_info.location[idx]
+        Some(&source_info.location[idx])
     }
 
     fn append_doc(&mut self, fq_name: &str, field_name: Option<&str>) {
@@ -709,91 +735,166 @@ impl<'a> CodeGenerator<'a> {
             self.config.disable_comments.get(fq_name).next().is_none()
         };
         if append_doc {
-            Comments::from_location(self.location()).append_with_indent(self.depth, self.buf)
+            if let Some(comments) = self.location().map(Comments::from_location) {
+                comments.append_with_indent(self.depth, self.buf);
+            }
         }
     }
 
     fn append_enum(&mut self, desc: EnumDescriptorProto) {
         debug!("  enum: {:?}", desc.name());
 
-        // Skip external types.
-        let enum_name = &desc.name();
+        let proto_enum_name = desc.name();
+        let enum_name = to_upper_camel(proto_enum_name);
+
         let enum_values = &desc.value;
-        let fq_enum_name = format!(
+        let fq_proto_enum_name = format!(
             "{}{}.{}",
             if self.package.is_empty() { "" } else { "." },
             self.package,
-            enum_name
+            proto_enum_name
         );
-        if self.extern_paths.resolve_ident(&fq_enum_name).is_some() {
+        if self
+            .extern_paths
+            .resolve_ident(&fq_proto_enum_name)
+            .is_some()
+        {
             return;
         }
 
-        self.append_doc(&fq_enum_name, None);
-        self.append_type_attributes(&fq_enum_name);
+        self.append_doc(&fq_proto_enum_name, None);
+        self.append_type_attributes(&fq_proto_enum_name);
+        self.append_enum_attributes(&fq_proto_enum_name);
         self.push_indent();
         self.buf.push_str(
-            "#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]\n",
+            &format!("#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, {}::Enumeration)]\n",self.config.prost_path.as_deref().unwrap_or("::prost")),
         );
         self.push_indent();
         self.buf.push_str("#[repr(i32)]\n");
         self.push_indent();
         self.buf.push_str("pub enum ");
-        self.buf.push_str(&to_upper_camel(desc.name()));
+        self.buf.push_str(&enum_name);
         self.buf.push_str(" {\n");
 
-        let mut numbers = HashSet::new();
+        let variant_mappings =
+            build_enum_value_mappings(&enum_name, self.config.strip_enum_prefix, enum_values);
 
         self.depth += 1;
         self.path.push(2);
-        for (idx, value) in enum_values.iter().enumerate() {
-            // Skip duplicate enum values. Protobuf allows this when the
-            // 'allow_alias' option is set.
-            if !numbers.insert(value.number()) {
-                continue;
-            }
+        for variant in variant_mappings.iter() {
+            self.path.push(variant.path_idx as i32);
 
-            self.path.push(idx as i32);
-            let stripped_prefix = if self.config.strip_enum_prefix {
-                Some(to_upper_camel(enum_name))
-            } else {
-                None
-            };
-            self.append_enum_value(&fq_enum_name, value, stripped_prefix);
+            self.append_doc(&fq_proto_enum_name, Some(variant.proto_name));
+            self.append_field_attributes(&fq_proto_enum_name, variant.proto_name);
+            self.push_indent();
+            self.buf.push_str(&variant.generated_variant_name);
+            self.buf.push_str(" = ");
+            self.buf.push_str(&variant.proto_number.to_string());
+            self.buf.push_str(",\n");
+
             self.path.pop();
         }
+
         self.path.pop();
         self.depth -= 1;
 
         self.push_indent();
         self.buf.push_str("}\n");
-    }
 
-    fn append_enum_value(
-        &mut self,
-        fq_enum_name: &str,
-        value: &EnumValueDescriptorProto,
-        prefix_to_strip: Option<String>,
-    ) {
-        self.append_doc(fq_enum_name, Some(value.name()));
-        self.append_field_attributes(fq_enum_name, value.name());
         self.push_indent();
-        let name = to_upper_camel(value.name());
-        let name_unprefixed = match prefix_to_strip {
-            Some(prefix) => strip_enum_prefix(&prefix, &name),
-            None => &name,
-        };
-        self.buf.push_str(name_unprefixed);
-        self.buf.push_str(" = ");
-        self.buf.push_str(&value.number().to_string());
-        self.buf.push_str(",\n");
+        self.buf.push_str("impl ");
+        self.buf.push_str(&enum_name);
+        self.buf.push_str(" {\n");
+        self.depth += 1;
+        self.path.push(2);
+
+        self.push_indent();
+        self.buf.push_str(
+            "/// String value of the enum field names used in the ProtoBuf definition.\n",
+        );
+        self.push_indent();
+        self.buf.push_str("///\n");
+        self.push_indent();
+        self.buf.push_str(
+            "/// The values are not transformed in any way and thus are considered stable\n",
+        );
+        self.push_indent();
+        self.buf.push_str(
+            "/// (if the ProtoBuf definition does not change) and safe for programmatic use.\n",
+        );
+        self.push_indent();
+        self.buf
+            .push_str("pub fn as_str_name(&self) -> &'static str {\n");
+        self.depth += 1;
+
+        self.push_indent();
+        self.buf.push_str("match self {\n");
+        self.depth += 1;
+
+        for variant in variant_mappings.iter() {
+            self.push_indent();
+            self.buf.push_str(&enum_name);
+            self.buf.push_str("::");
+            self.buf.push_str(&variant.generated_variant_name);
+            self.buf.push_str(" => \"");
+            self.buf.push_str(variant.proto_name);
+            self.buf.push_str("\",\n");
+        }
+
+        self.depth -= 1;
+        self.push_indent();
+        self.buf.push_str("}\n"); // End of match
+
+        self.depth -= 1;
+        self.push_indent();
+        self.buf.push_str("}\n"); // End of as_str_name()
+
+        self.push_indent();
+        self.buf
+            .push_str("/// Creates an enum from field names used in the ProtoBuf definition.\n");
+
+        self.push_indent();
+        self.buf
+            .push_str("pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {\n");
+        self.depth += 1;
+
+        self.push_indent();
+        self.buf.push_str("match value {\n");
+        self.depth += 1;
+
+        for variant in variant_mappings.iter() {
+            self.push_indent();
+            self.buf.push('\"');
+            self.buf.push_str(variant.proto_name);
+            self.buf.push_str("\" => Some(Self::");
+            self.buf.push_str(&variant.generated_variant_name);
+            self.buf.push_str("),\n");
+        }
+        self.push_indent();
+        self.buf.push_str("_ => None,\n");
+
+        self.depth -= 1;
+        self.push_indent();
+        self.buf.push_str("}\n"); // End of match
+
+        self.depth -= 1;
+        self.push_indent();
+        self.buf.push_str("}\n"); // End of from_str_name()
+
+        self.path.pop();
+        self.depth -= 1;
+        self.push_indent();
+        self.buf.push_str("}\n"); // End of impl
     }
 
     fn push_service(&mut self, service: ServiceDescriptorProto) {
         let name = service.name().to_owned();
         debug!("  service: {:?}", name);
 
-        let comments = Comments::from_location(self.location());
+        let comments = self
+            .location()
+            .map(Comments::from_location)
+            .unwrap_or_default();
 
         self.path.push(2);
         let methods = service
@@ -802,8 +903,12 @@ impl<'a> CodeGenerator<'a> {
             .enumerate()
             .map(|(idx, mut method)| {
                 debug!("  method: {:?}", method.name());
+
                 self.path.push(idx as i32);
-                let comments = Comments::from_location(self.location());
+                let comments = self
+                    .location()
+                    .map(Comments::from_location)
+                    .unwrap_or_default();
                 self.path.pop();
 
                 let name = method.name.take().unwrap();
@@ -876,6 +981,8 @@ impl<'a> CodeGenerator<'a> {
     }
 
     fn resolve_type(&self, field: &FieldDescriptorProto, fq_message_name: &str) -> String {
+        let prost_path = self.config.prost_path.as_deref().unwrap_or("::prost");
+
         match field.r#type() {
             Type::Float => String::from("f32"),
             Type::Double => String::from("f64"),
@@ -884,7 +991,7 @@ impl<'a> CodeGenerator<'a> {
             Type::Int32 | Type::Sfixed32 | Type::Sint32 | Type::Enum => String::from("i32"),
             Type::Int64 | Type::Sfixed64 | Type::Sint64 => String::from("i64"),
             Type::Bool => String::from("bool"),
-            Type::String => String::from("::prost::alloc::string::String"),
+            Type::String => format!("{}::alloc::string::String", prost_path),
             Type::Bytes => self
                 .config
                 .bytes_type
@@ -951,7 +1058,7 @@ impl<'a> CodeGenerator<'a> {
             Type::Group => Cow::Borrowed("group"),
             Type::Message => Cow::Borrowed("message"),
             Type::Enum => Cow::Owned(format!(
-                "enumeration = {:?}",
+                "enumeration={:?}",
                 self.resolve_ident(field.type_name())
             )),
         }
@@ -1079,11 +1186,11 @@ fn unescape_c_escape_string(s: &str) -> Vec<u8> {
                     p += 1;
                 }
                 b'0'..=b'7' => {
-                    eprintln!("another octal: {}, offset: {}", s, &s[p..]);
+                    debug!("another octal: {}, offset: {}", s, &s[p..]);
                     let mut octal = 0;
                     for _ in 0..3 {
                         if p < len && src[p] >= b'0' && src[p] <= b'7' {
-                            eprintln!("\toctal: {}", octal);
+                            debug!("\toctal: {}", octal);
                             octal = octal * 8 + (src[p] - b'0');
                             p += 1;
                         } else {
@@ -1125,7 +1232,7 @@ fn unescape_c_escape_string(s: &str) -> Vec<u8> {
 ///
 /// It also tries to handle cases where the stripped name would be
 /// invalid - for example, if it were to begin with a number.
-fn strip_enum_prefix<'a>(prefix: &str, name: &'a str) -> &'a str {
+fn strip_enum_prefix(prefix: &str, name: &str) -> String {
     let stripped = name.strip_prefix(prefix).unwrap_or(name);
 
     // If the next character after the stripped prefix is not
@@ -1137,10 +1244,55 @@ fn strip_enum_prefix<'a>(prefix: &str, name: &'a str) -> &'a str {
         .map(char::is_uppercase)
         .unwrap_or(false)
     {
-        stripped
+        stripped.to_owned()
     } else {
-        name
+        name.to_owned()
     }
+}
+
+struct EnumVariantMapping<'a> {
+    path_idx: usize,
+    proto_name: &'a str,
+    proto_number: i32,
+    generated_variant_name: String,
+}
+
+fn build_enum_value_mappings<'a>(
+    generated_enum_name: &str,
+    do_strip_enum_prefix: bool,
+    enum_values: &'a [EnumValueDescriptorProto],
+) -> Vec<EnumVariantMapping<'a>> {
+    let mut numbers = HashSet::new();
+    let mut generated_names = HashMap::new();
+    let mut mappings = Vec::new();
+
+    for (idx, value) in enum_values.iter().enumerate() {
+        // Skip duplicate enum values. Protobuf allows this when the
+        // 'allow_alias' option is set.
+        if !numbers.insert(value.number()) {
+            continue;
+        }
+
+        let mut generated_variant_name = to_upper_camel(value.name());
+        if do_strip_enum_prefix {
+            generated_variant_name =
+                strip_enum_prefix(generated_enum_name, &generated_variant_name);
+        }
+
+        if let Some(old_v) = generated_names.insert(generated_variant_name.to_owned(), value.name())
+        {
+            panic!("Generated enum variant names overlap: `{}` variant name to be used both by `{}` and `{}` ProtoBuf enum values",
+                   generated_variant_name, old_v, value.name());
+        }
+
+        mappings.push(EnumVariantMapping {
+            path_idx: idx,
+            proto_name: value.name(),
+            proto_number: value.number(),
+            generated_variant_name,
+        })
+    }
+    mappings
 }
 
 impl MapType {
