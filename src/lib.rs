@@ -927,8 +927,8 @@ impl Config {
 
             let file_name = if file_name.ends_with(".rs") {
                 let check = &file_name[..file_name.len() - 3];
-                if check.contains(".") {
-                    format!("{}.rs", check.replace(".", "_"))
+                if check.contains('.') {
+                    format!("{}.rs", check.replace('.', "_"))
                 } else {
                     file_name.to_string()
                 }
